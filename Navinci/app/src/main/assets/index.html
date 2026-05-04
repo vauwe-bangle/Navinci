@@ -82,12 +82,17 @@
             </button>
         </div>
 
-        <!-- CSC-Sensor + OsmAnd -->
+        <!-- CSC-Sensor + OsmAnd + benutzerdefinierte App -->
         <div style="display:flex;gap:8px;margin-top:4px;">
             <button class="dbtn" id="cscbtn" data-status="disconnected"
                     onclick="onBtnCscConnect()" style="flex:1;">Sensor verbinden</button>
             <button class="dbtn osmand-btn"
                     onclick="onBtnOsmAnd()" style="flex:1;">🗺 OsmAnd</button>
+        </div>
+        <div style="margin-top:8px;">
+            <button class="dbtn" id="btn-custom-app"
+                    onclick="onBtnCustomApp()"
+                    style="width:100%;display:none;">▶ App</button>
         </div>
     </div>
 
@@ -123,6 +128,34 @@
                 <div class="clabel" id="l-gain">Höhenmeter ↑</div>
                 <div class="cval sm" id="v-gain">0</div>
                 <div class="cunit">m</div>
+            </div>
+        </div>
+
+        <!-- Benutzerdefinierte Split-Screen-App -->
+        <div class="note-card" style="background:#E3F2FD;border-color:#64B5F6;">
+            <div class="note-label" id="l-customapp" style="color:#1565C0;">▶ Split-Screen App</div>
+            <div style="display:flex;gap:8px;align-items:center;margin-top:6px;">
+                <input type="text" id="input-app-name"
+                       placeholder="Anzeigename (z.B. Maps)"
+                       style="flex:1;border:1px solid #90CAF9;border-radius:6px;
+                      padding:7px 10px;font-size:14px;font-family:inherit;
+                      background:#fff;outline:none;">
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;margin-top:6px;">
+                <input type="text" id="input-app-pkg"
+                       placeholder="Paketname (z.B. com.google.android.apps.maps)"
+                       style="flex:1;border:1px solid #90CAF9;border-radius:6px;
+                      padding:7px 10px;font-size:13px;font-family:monospace;
+                      background:#fff;outline:none;">
+                <button onclick="saveCustomApp()"
+                        class="dbtn" style="margin:0;padding:9px 16px;background:#1565C0;">Speichern</button>
+                <button onclick="openAppPicker()"
+                        class="dbtn" style="margin:0;padding:9px 16px;background:#0277BD;">🔍</button>
+            </div>
+            <div style="font-size:11px;color:#666;margin-top:5px;line-height:1.5;"
+                 id="customapp-hint">
+                Paketname der gewünschten App eingeben.
+                Bekannte Paketnamen: com.google.android.apps.maps · com.here.app.maps · de.sygic.aura
             </div>
         </div>
 
@@ -207,6 +240,30 @@
     </div>
 
 </div>
+
+<!-- App-Picker Modal -->
+<div id="app-picker" style="display:none;position:fixed;inset:0;z-index:200;
+     background:rgba(0,0,0,0.55);align-items:flex-end;justify-content:center;">
+    <div style="background:#fff;width:100%;max-width:480px;border-radius:16px 16px 0 0;
+              padding:16px 0 0;max-height:80vh;display:flex;flex-direction:column;">
+        <div style="display:flex;align-items:center;gap:10px;padding:0 16px 12px;
+                border-bottom:1px solid #eee;flex-shrink:0;">
+            <span style="font-size:15px;font-weight:700;flex:1;">App auswählen</span>
+            <button onclick="closeAppPicker()"
+                    style="background:none;border:none;font-size:22px;color:#999;cursor:pointer;padding:0 4px;">✕</button>
+        </div>
+        <div style="padding:10px 16px;flex-shrink:0;">
+            <input id="app-search" type="text" placeholder="App suchen…"
+                   oninput="filterApps(this.value)"
+                   style="width:100%;padding:9px 12px;border:1px solid #ddd;
+                    border-radius:8px;font-size:14px;font-family:inherit;outline:none;">
+        </div>
+        <div id="app-list" style="overflow-y:auto;flex:1;padding:0 8px 16px;">
+            <div style="text-align:center;padding:24px;color:#aaa;font-size:13px;">Lade Apps…</div>
+        </div>
+    </div>
+</div>
+
 <script src="js/app.js"></script>
 </body>
 </html>

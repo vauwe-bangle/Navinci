@@ -223,6 +223,52 @@ class Bridge(private val ctx: MainActivity) {
     /** OsmAnd öffnen */
     @JavascriptInterface fun launchOsmAnd() { ctx.runOnUiThread { ctx.launchOsmAnd() } }
 
+    /** Alle installierten Apps mit Launcher-Icon als JSON-Array zurückgeben */
+    @JavascriptInterface
+    fun getInstalledApps(): String {
+        val pm      = ctx.packageManager
+        val intent  = android.content.Intent(android.content.Intent.ACTION_MAIN).apply {
+            addCategory(android.content.Intent.CATEGORY_LAUNCHER)
+        }
+        val flags = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M)
+            android.content.pm.PackageManager.MATCH_ALL else 0
+
+        val activities = pm.queryIntentActivities(intent, flags)
+        val result = activities
+            .map { info ->
+                val name = info.loadLabel(pm).toString()
+                    .replace("\\", "\\\\")
+                    .replace("\"", "\\\"")
+                val pkg  = info.activityInfo.packageName
+                "{\"name\":\"$name\",\"pkg\":\"$pkg\"}"
+            }
+            .distinctBy { it }
+            .sortedBy { it.lowercase() }
+        return "[${result.joinToString(",")}]"
+    }
+    @JavascriptInterface
+    fun launchApp(packageName: String) {
+        ctx.runOnUiThread {
+            val intent = ctx.packageManager.getLaunchIntentForPackage(packageName.trim())
+            if (intent != null) {
+                intent.addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                            Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT
+                )
+                if (!ctx.isInMultiWindowMode) {
+                    Toast.makeText(ctx,
+                        "Tipp: Navinci zuerst in Split-Screen setzen",
+                        Toast.LENGTH_LONG).show()
+                }
+                ctx.startActivity(intent)
+            } else {
+                Toast.makeText(ctx,
+                    "App nicht gefunden: $packageName",
+                    Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
     /** GPS starten/stoppen */
     @JavascriptInterface fun startGps() { if (ctx.hasPermissions()) ctx.gpsManager.start() }
     @JavascriptInterface fun stopGps()  { ctx.gpsManager.stop() }

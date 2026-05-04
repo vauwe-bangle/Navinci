@@ -512,6 +512,129 @@ function updateCard1Labels() {
         val.textContent  = src ? src.textContent : '0';
     }
 }
+// ── Benutzerdefinierte Split-Screen-App ───────────────────────────────────────
+
+function loadCustomApp() {
+    return {
+        name: localStorage.getItem('navinci_app_name') || '',
+        pkg:  localStorage.getItem('navinci_app_pkg')  || ''
+    };
+}
+
+function updateCustomAppButton() {
+    const app = loadCustomApp();
+    const btn = document.getElementById('btn-custom-app');
+    if (!btn) return;
+    if (app.pkg) {
+        btn.style.display = 'block';
+        btn.textContent   = '▶ ' + (app.name || app.pkg);
+    } else {
+        btn.style.display = 'none';
+    }
+}
+
+window.saveCustomApp = function() {
+    const name = (document.getElementById('input-app-name')?.value || '').trim();
+    const pkg  = (document.getElementById('input-app-pkg')?.value  || '').trim();
+    localStorage.setItem('navinci_app_name', name);
+    localStorage.setItem('navinci_app_pkg',  pkg);
+    updateCustomAppButton();
+    showToast(pkg ? '✓ App gespeichert: ' + (name || pkg) : '✓ Zusatzbutton entfernt');
+};
+
+// ── App-Picker ────────────────────────────────────────────────────────────────
+
+let _allApps = [];   // gecacht nach erstem Laden
+
+window.openAppPicker = function() {
+    const picker = document.getElementById('app-picker');
+    if (!picker) return;
+    picker.style.display = 'flex';
+    document.getElementById('app-search').value = '';
+
+    // Immer neu laden (kein Cache — Liste kann sich ändern)
+    document.getElementById('app-list').innerHTML =
+        '<div style="text-align:center;padding:24px;color:#aaa;font-size:13px;">Lade Apps…</div>';
+
+    setTimeout(() => {
+        try {
+            const json = NativeBridge.getInstalledApps();
+            _allApps   = JSON.parse(json);
+            renderAppList(_allApps);
+        } catch (e) {
+            document.getElementById('app-list').innerHTML =
+                '<div style="text-align:center;padding:24px;color:#e53935;font-size:13px;">Fehler: ' + e.message + '</div>';
+        }
+    }, 80);
+};
+
+window.closeAppPicker = function() {
+    const picker = document.getElementById('app-picker');
+    if (picker) picker.style.display = 'none';
+};
+
+window.filterApps = function(query) {
+    const q = query.toLowerCase().trim();
+    const filtered = q ? _allApps.filter(a =>
+        a.name.toLowerCase().includes(q) || a.pkg.toLowerCase().includes(q)
+    ) : _allApps;
+    renderAppList(filtered);
+};
+
+function renderAppList(apps) {
+    const el = document.getElementById('app-list');
+    if (!apps.length) {
+        el.innerHTML = '<div style="text-align:center;padding:24px;color:#aaa;font-size:13px;">Keine Apps gefunden</div>';
+        return;
+    }
+    // Daten in data-Attribute schreiben — keine verschachtelten Anführungszeichen nötig
+    el.innerHTML = apps.map((a, i) =>
+        `<div class="app-item" data-idx="${i}"
+              style="display:flex;flex-direction:column;padding:11px 10px;
+                     border-radius:8px;cursor:pointer;margin-bottom:2px;">
+           <span style="font-size:14px;font-weight:600;color:#111;pointer-events:none;">${escHtml(a.name)}</span>
+           <span style="font-size:11px;color:#999;font-family:monospace;margin-top:1px;pointer-events:none;">${escHtml(a.pkg)}</span>
+         </div>`
+    ).join('');
+
+    // Event-Delegation: ein Listener auf dem Container
+    el.onclick = (e) => {
+        const item = e.target.closest('.app-item');
+        if (!item) return;
+        const idx = parseInt(item.dataset.idx, 10);
+        const app = apps[idx];
+        if (app) selectApp(app.pkg, app.name);
+    };
+
+    // Touch-Feedback via CSS-Klasse
+    el.ontouchstart = (e) => {
+        const item = e.target.closest('.app-item');
+        if (item) item.style.background = '#f0f0f0';
+    };
+    el.ontouchend = (e) => {
+        const item = e.target.closest('.app-item');
+        if (item) setTimeout(() => { item.style.background = ''; }, 150);
+    };
+}
+
+function escHtml(str) {
+    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+window.selectApp = function(pkg, name) {
+    document.getElementById('input-app-pkg').value  = pkg;
+    document.getElementById('input-app-name').value = name;
+    closeAppPicker();
+    saveCustomApp();
+};
+
+window.onBtnCustomApp = function() {
+    const app = loadCustomApp();
+    if (!app.pkg) { showToast('Keine App konfiguriert (→ Stats)'); return; }
+    if (typeof NativeBridge !== 'undefined') NativeBridge.launchApp(app.pkg);
+};
+
+// ── Screen-Navigation ─────────────────────────────────────────────────────────
 window.showScr = function(name, btn) {
     ['live','stats','hist'].forEach(n => {
         document.getElementById('scr-'+n).style.display = n===name ? 'block' : 'none';
@@ -802,3 +925,13 @@ updateHistNav();
 applyLabels();
 initCard1Toggle();
 updateCard1Labels();
+updateCustomAppButton();
+
+// Gespeicherte Werte in Settings-Felder laden
+(function loadCustomAppFields() {
+    const app = loadCustomApp();
+    const nm  = document.getElementById('input-app-name');
+    const pk  = document.getElementById('input-app-pkg');
+    if (nm) nm.value = app.name;
+    if (pk) pk.value = app.pkg;
+})();
