@@ -94,12 +94,21 @@ class MainActivity : AppCompatActivity() {
 
     internal fun launchOsmAnd() {
         for (pkg in listOf(OSMAND_PKG_PLUS, OSMAND_PKG_FREE)) {
-            val intent = packageManager.getLaunchIntentForPackage(pkg)
-            if (intent != null) {
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                startActivity(intent)
-                return
+            val intent = packageManager.getLaunchIntentForPackage(pkg) ?: continue
+            intent.addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT  // öffnet im anderen Split-Screen-Feld
+            )
+            // Hinweis wenn Split-Screen noch nicht aktiv
+            if (!isInMultiWindowMode) {
+                Toast.makeText(
+                    this,
+                    "Tipp: Navinci zuerst in Split-Screen setzen → dann OsmAnd hier tippen",
+                    Toast.LENGTH_LONG
+                ).show()
             }
+            startActivity(intent)
+            return
         }
         Toast.makeText(this, "OsmAnd ist nicht installiert", Toast.LENGTH_SHORT).show()
     }

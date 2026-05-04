@@ -249,8 +249,12 @@ window.updateGps = function(data) {
         // ─────────────────────────────────────────────────────────────────
 
         // Anzeige (immer, unabhängig von Barometer)
-        const altEl = document.getElementById('v-alt');
-        if (altEl && !_hasBaro) altEl.textContent = Math.round(_kAlt);
+        const altEl = document.getElementById('v-alt-hidden');
+        if (altEl) altEl.textContent = Math.round(_kAlt);
+        if (!_hasBaro && _card1Mode === 'alt') {
+            const c = document.getElementById('v-card1');
+            if (c) c.textContent = Math.round(_kAlt);
+        }
 
         // GPS-Gain nur wenn kein Barometer
         if (!_hasBaro && _rideState === 'running') {
@@ -306,10 +310,14 @@ window.updateFromService = function(data) {
     if (_hasBaro) {
         const altVal  = (d.altitude !== undefined && d.altitude !== null) ? Math.round(d.altitude) : 0;
         const gainVal = (d.gain     !== undefined && d.gain     !== null) ? Math.round(d.gain)     : 0;
-        const altEl = document.getElementById('v-alt');
-        const gnEl  = document.getElementById('v-gain');
-        if (altEl) altEl.textContent = altVal;
-        if (gnEl)  gnEl.textContent  = gainVal;
+        const altHidden = document.getElementById('v-alt-hidden');
+        const gnEl      = document.getElementById('v-gain');
+        if (altHidden) altHidden.textContent = altVal;
+        if (gnEl)      gnEl.textContent      = gainVal;
+        if (_card1Mode === 'alt') {
+            const c = document.getElementById('v-card1');
+            if (c) c.textContent = altVal;
+        }
         if (_rideState === 'running') _rideGainM = gainVal;
     }
 
@@ -334,8 +342,17 @@ window.updateFromService = function(data) {
 // ── Cadence ───────────────────────────────────────────────────────────────────
 window.updateCadence = function(data) {
     const d  = typeof data === 'string' ? JSON.parse(data) : data;
+    // Verstecktes Feld (Screen 2 liest direkt v-cad dort)
+    const hidden = document.getElementById('v-cad-hidden');
+    if (hidden) hidden.textContent = d.cadence;
+    // Screen-2-Anzeige
     const el = document.getElementById('v-cad');
     if (el) el.textContent = d.cadence;
+    // Screen-1-Card wenn im Cadence-Modus
+    if (_card1Mode === 'cad') {
+        const c = document.getElementById('v-card1');
+        if (c) c.textContent = d.cadence;
+    }
     if (_rideState === 'running' && d.cadence > 0) _rideCadences.push(d.cadence);
 };
 
@@ -447,7 +464,54 @@ window.saveWheelCircumference = function() {
     showToast(L.wheelSaved);
 };
 
-// ── Screen-Navigation ─────────────────────────────────────────────────────────
+// ── Screen-1-Card: Höhe ↔ Trittfrequenz (Long-Press Toggle) ──────────────────
+let _card1Mode = localStorage.getItem('navinci_card1') || 'alt'; // 'alt' | 'cad'
+
+function initCard1Toggle() {
+    const card = document.getElementById('card1');
+    if (!card) return;
+    let pressTimer = null;
+    const LONG_MS  = 600;
+
+    const start = () => { pressTimer = setTimeout(toggleCard1, LONG_MS); };
+    const cancel= () => { clearTimeout(pressTimer); pressTimer = null; };
+
+    card.addEventListener('touchstart',  start,  { passive: true });
+    card.addEventListener('touchend',    cancel);
+    card.addEventListener('touchcancel', cancel);
+    card.addEventListener('mousedown',   start);
+    card.addEventListener('mouseup',     cancel);
+    card.addEventListener('mouseleave',  cancel);
+}
+
+function toggleCard1() {
+    _card1Mode = _card1Mode === 'alt' ? 'cad' : 'alt';
+    localStorage.setItem('navinci_card1', _card1Mode);
+    updateCard1Labels();
+    // Kurzes visuelles Feedback
+    const card = document.getElementById('card1');
+    if (card) { card.style.opacity = '0.4'; setTimeout(() => card.style.opacity = '', 200); }
+}
+
+function updateCard1Labels() {
+    const L    = LABELS[getLang()];
+    const lbl  = document.getElementById('l-card1');
+    const val  = document.getElementById('v-card1');
+    const unit = document.getElementById('u-card1');
+    if (!lbl || !val || !unit) return;
+    if (_card1Mode === 'alt') {
+        lbl.textContent  = L.alt;
+        unit.textContent = 'm';
+        // Aktuellen Wert von v-alt übernehmen (falls bereits sichtbar)
+        const src = document.getElementById('v-alt-hidden');
+        val.textContent  = src ? src.textContent : '--';
+    } else {
+        lbl.textContent  = L.cad;
+        unit.textContent = 'rpm';
+        const src = document.getElementById('v-cad-hidden');
+        val.textContent  = src ? src.textContent : '0';
+    }
+}
 window.showScr = function(name, btn) {
     ['live','stats','hist'].forEach(n => {
         document.getElementById('scr-'+n).style.display = n===name ? 'block' : 'none';
@@ -736,3 +800,5 @@ applyTheme(localStorage.getItem('navinci_theme') || 'teal');
 
 updateHistNav();
 applyLabels();
+initCard1Toggle();
+updateCard1Labels();

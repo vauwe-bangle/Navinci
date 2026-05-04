@@ -49,11 +49,16 @@
                 <div class="cval" id="v-dist">0.00</div>
                 <div class="cunit">km</div>
             </div>
-            <div class="card">
-                <div class="clabel" id="l-alt">Höhe</div>
-                <div class="cval" id="v-alt">--</div>
-                <div class="cunit">m</div>
+            <div class="card" id="card1" style="cursor:pointer;user-select:none;"
+                 title="Lang drücken zum Wechseln">
+                <div class="clabel" id="l-card1">Höhe</div>
+                <div class="cval" id="v-card1">--</div>
+                <div class="cunit" id="u-card1">m</div>
+                <div style="font-size:9px;color:#999;margin-top:3px;letter-spacing:.04em;">⟳ LANG DRÜCKEN</div>
             </div>
+            <!-- Versteckte Datenspeicher (werden von JS beschrieben, unsichtbar) -->
+            <span id="v-alt-hidden" style="display:none">--</span>
+            <span id="v-cad-hidden" style="display:none">0</span>
             <div class="card">
                 <div class="clabel" id="l-time">Fahrzeit</div>
                 <div class="cval sm" id="v-time">00:00</div>
