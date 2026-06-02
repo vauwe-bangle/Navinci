@@ -33,6 +33,7 @@ class BleManager(
         activity.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
     private val bluetoothAdapter = bluetoothManager.adapter
     private var gattCsc: BluetoothGatt? = null
+    private var isScanning = false
 
     private val handler           = Handler(Looper.getMainLooper())
     private var cadenceResetJob: Runnable? = null
@@ -59,13 +60,22 @@ class BleManager(
     // ── Scan ──────────────────────────────────────────────────────────────
 
     fun scanCsc() {
+        // Laufenden Scan zuerst stoppen (ermöglicht Neustart per Tastendruck)
+        if (isScanning) {
+            bluetoothAdapter.bluetoothLeScanner?.stopScan(scanCscCallback)
+            isScanning = false
+        }
         Log.d(TAG, "Starte BLE-Scan (CSC)…")
         bluetoothAdapter.bluetoothLeScanner.startScan(null, scanSettings, scanCscCallback)
+        isScanning = true
         handler.postDelayed({
-            bluetoothAdapter.bluetoothLeScanner.stopScan(scanCscCallback)
-            if (gattCsc == null) {
-                Log.d(TAG, "CSC Scan Timeout")
-                onCscStatus?.invoke("timeout")
+            if (isScanning) {
+                bluetoothAdapter.bluetoothLeScanner.stopScan(scanCscCallback)
+                isScanning = false
+                if (gattCsc == null) {
+                    Log.d(TAG, "CSC Scan Timeout")
+                    onCscStatus?.invoke("timeout")
+                }
             }
         }, 30_000)
     }
@@ -76,11 +86,13 @@ class BleManager(
             if (uuids.any { it.uuid == CSC_SERVICE }) {
                 Log.d(TAG, "CSC Sensor gefunden: ${result.device.name} (${result.device.address})")
                 bluetoothAdapter.bluetoothLeScanner.stopScan(this)
+                isScanning = false
                 connectCsc(result.device)
             }
         }
         override fun onScanFailed(errorCode: Int) {
             Log.e(TAG, "CSC Scan fehlgeschlagen: $errorCode")
+            isScanning = false
             onCscStatus?.invoke("timeout")
         }
     }

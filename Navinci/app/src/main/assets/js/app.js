@@ -117,8 +117,9 @@ let _rideAvgSpd   = 0.0;
 let _rideCadences = [];
 let _rideGainM    = 0;        // Höhenmeter gesamt dieser Fahrt
 let _rideStartTime= null;
-window._rideTimer   = null;
-window._lastSvcDist = null;
+window._rideTimer       = null;
+window._lastSvcDist     = null;
+window._rideSecOffset   = null;   // Service-Sekunden beim Fahrtstart (für Delta-Berechnung)
 
 // GPS-Höhe mit Kalman-Filter (Fallback wenn kein Barometer)
 // 1D-Kalman: glättet GPS-Rauschen (±15–30 m) auf ±3–5 m
@@ -156,8 +157,9 @@ window.rideStart = function() {
     stopRideTimer();
     if (_rideState === 'idle') {
         _rideSeconds = 0; _rideDist = 0.0; _rideMaxSpd = 0.0; _rideAvgSpd = 0.0;
-        _rideCadences = []; _rideGainM = 0; _rideStartTime = new Date(); window._lastSvcDist = null;
-        _gpsLastAlt = _kAlt; _gpsGain = 0;  // GPS-Gain-Reset
+        _rideCadences = []; _rideGainM = 0; _rideStartTime = new Date();
+        window._lastSvcDist = null; window._rideSecOffset = null;
+        _gpsLastAlt = _kAlt; _gpsGain = 0;
         const noteEl = document.getElementById('ride-note');
         if (noteEl) noteEl.value = '';
         localStorage.removeItem('navinci_current_note');
@@ -187,7 +189,8 @@ window.rideStop = function() {
         stopRideTimer(); saveCurrentRide();
         _rideState = 'idle'; _rideSeconds = 0; _rideDist = 0.0;
         _rideMaxSpd = 0.0; _rideAvgSpd = 0.0; _rideCadences = []; _rideGainM = 0;
-        _gpsGain = 0; _gpsLastAlt = null; window._lastSvcDist = null;
+        _gpsGain = 0; _gpsLastAlt = null;
+        window._lastSvcDist = null; window._rideSecOffset = null;
         if (typeof NativeBridge !== 'undefined') NativeBridge.resetService();
         const s = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
         s('v-spd','0.0'); s('v-dist','0.00'); s('v-time','00:00');
@@ -329,7 +332,15 @@ window.updateFromService = function(data) {
     _rideDist += delta;
     set('v-dist', _rideDist.toFixed(2));
 
-    if (d.seconds > _rideSeconds) { _rideSeconds = d.seconds; set('v-time', fmtTime(_rideSeconds)); }
+    if (d.seconds > _rideSeconds) {
+        // Beim ersten Update nach Start: Offset setzen → Fahrzeit beginnt immer bei 0
+        if (window._rideSecOffset === null) window._rideSecOffset = d.seconds;
+        const adjusted = Math.max(0, d.seconds - window._rideSecOffset);
+        if (adjusted > _rideSeconds) {
+            _rideSeconds = adjusted;
+            set('v-time', fmtTime(_rideSeconds));
+        }
+    }
 
     if (_speedSource === 'gps' && d.speed > _rideMaxSpd) {
         _rideMaxSpd = d.speed; set('v-maxspd', _rideMaxSpd.toFixed(1));
@@ -386,7 +397,7 @@ window.onPermissionDenied = function() {
 };
 
 // ── Wake Lock ─────────────────────────────────────────────────────────────────
-window._wakeLockOn = false;
+window._wakeLockOn = true;   // Standard: Display bleibt aktiv
 window.toggleWakeLock = function() {
     window._wakeLockOn = !window._wakeLockOn;
     const btn = document.getElementById('wakelock-btn');
@@ -431,7 +442,18 @@ window.onBtnCscConnect = function() {
         stopScanAnimation();
         const el = document.getElementById('v-cad'); if (el) el.textContent = '0';
     } else if (cscbtn.dataset.status === 'scanning') {
-        showToast(getLang()==='de' ? 'Suche läuft…' : 'Scanning…');
+        // Zweiter Tipp während Scan → abbrechen und neu starten
+        NativeBridge.stopCsc();
+        stopScanAnimation();
+        cscbtn.dataset.status = 'disconnected';
+        cscbtn.classList.remove('scanning');
+        showToast(getLang()==='de' ? 'Scan wird neu gestartet…' : 'Restarting scan…');
+        setTimeout(() => {
+            cscbtn.dataset.status = 'scanning'; cscbtn.classList.add('scanning');
+            if (dot) dot.className = 'dot scan';
+            startScanAnimation();
+            NativeBridge.startCsc();
+        }, 800);
     } else {
         showToast(L.btHint);
         cscbtn.dataset.status = 'scanning'; cscbtn.classList.add('scanning');
@@ -926,6 +948,18 @@ applyLabels();
 initCard1Toggle();
 updateCard1Labels();
 updateCustomAppButton();
+
+// Wake Lock beim Start sofort aktivieren
+(function initWakeLock() {
+    const btn = document.getElementById('wakelock-btn');
+    if (btn) {
+        btn.style.opacity    = '1';
+        btn.style.filter     = 'none';
+        btn.style.textShadow = '0 0 8px #FFD600';
+        btn.title = getLang() === 'de' ? 'Display: aktiv' : 'Screen: on';
+    }
+    if (typeof NativeBridge !== 'undefined') NativeBridge.setWakeLock(true);
+})();
 
 // Gespeicherte Werte in Settings-Felder laden
 (function loadCustomAppFields() {
