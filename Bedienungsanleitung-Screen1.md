@@ -2,9 +2,7 @@
 
 ## Screen 1: Live
 
-```Markdown
-![Screen1](screen1-nr.png)
-```
+<img src="../../_resources/94058393b4ac8ff2fbd4acb7399e8971-2.png" alt="94058393b4ac8ff2fbd4acb7399e8971.png" width="538" height="527">
 
 * * *
 
@@ -72,11 +70,26 @@ Verhindert die automatische Bildschirmabschaltung während der Fahrt. Ein Tipp a
 
 * * *
 
-### ⑩ Höhe / Trittfrequenz (Toggle)
+### ⑩ Uhrzeit / Höhe / Trittfrequenz (Toggle)
 
-Durch **langes Drücken** (ca. 0,6 Sekunden) auf die Höhe-Karte wird zwischen zwei Anzeigen umgeschaltet:
+Durch **langes Drücken** (ca. 0,6 Sekunden) auf die entsprechende Karte wird zwischen den Anzeigen umgeschaltet:
 
+- **Uhrzeit**
 - **Höhe** in Metern — aus Barometer oder GPS mit Kalman-Filter
 - **Trittfrequenz** in rpm — vom BLE-Sensor
 
 Die gewählte Ansicht bleibt beim nächsten App-Start erhalten.
+
+* * *
+
+Der Sensor hat Vorrang wenn er mit Bluetooth verbunden ist. Ein Klick erzwingt GPS auch wenn der Sensor verbunden ist — nützlich zum Vergleichen während der Fahrt.
+
+Dies ist die flexibelste Lösung: Normale Nutzung, aber manueller Eingriff jederzeit möglich.
+
+Der Button ist sichtbar:
+
+| Farbe | Symbol | Bedeutung |
+| --- | --- | --- |
+| 🔴 Rot | 📡  | Kein Sensor — GPS aktiv |
+| 🟢 Grün | ⚡   | Sensor verbunden — Automatik |
+| 🟡 Gelb | 📡  | GPS-Override aktiv |
