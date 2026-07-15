@@ -2,7 +2,7 @@
 
 ## Screen 1: Live
 
-<img src="_resources/screen1-Jul26.png" alt="screen1-Jul26.png" width="394" height="451">
+<img src="_resources/screen1-Jul26-1.png" alt="screen1-Jul26.png" width="395" height="427">
 
 * * *
 
