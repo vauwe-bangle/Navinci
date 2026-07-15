@@ -8,7 +8,7 @@ const LABELS = {
         spd:'Geschwindigkeit', dist:'Distanz', cad:'Trittfrequenz', time:'Fahrzeit',
         avgspd:'Ø Geschwindigkeit', totalkm:'Gesamtkilometer', maxspd:'Geschw.-Maximum',
         clock:'Uhrzeit',
-        conn:'Verbunden', disc:'Getrennt', scan:'Suche…',
+        conn:'Sensor: Verbunden', disc:'Sensor: Getrennt', scan:'Sensor: Suche…',
         btnCscConn:'Sensor verbinden', btnCscDisc:'Sensor trennen',
         noPermission:'Berechtigung fehlt',
         live:'▶ Live', stats:'∑ Stats', hist:'≡ Verlauf',
@@ -40,7 +40,7 @@ const LABELS = {
     en: {
         spd:'Speed', dist:'Distance', cad:'Cadence', time:'Ride Time',
         avgspd:'Avg Speed', totalkm:'Total Distance', maxspd:'Max Speed', clock:'Time',
-        conn:'Connected', disc:'Disconnected', scan:'Scanning…',
+        conn:'Sensor: Connected', disc:'Sensor: Disconnected', scan:'Sensor: Scanning…',
         btnCscConn:'Connect Sensor', btnCscDisc:'Disconnect Sensor',
         noPermission:'Permission denied',
         live:'▶ Live', stats:'∑ Stats', hist:'≡ History',
@@ -89,7 +89,7 @@ function applyLabels() {
     const cscbtn = document.getElementById('cscbtn');
     if (cscbtn) cscbtn.textContent = cscbtn.dataset.status === 'connected' ? L.btnCscDisc : L.btnCscConn;
     const lbtn = document.getElementById('lbtn');
-    if (lbtn) lbtn.textContent = getLang() === 'de' ? 'EN' : 'DE';
+    if (lbtn) lbtn.textContent = getLang() === 'de' ? 'DE' : 'EN';
     updateSpeedSrcBadge(); updateRideUI(); renderHistContent();
 }
 
@@ -99,13 +99,32 @@ window.toggleLang = function() {
 };
 
 // ── Geschwindigkeitsquelle ────────────────────────────────────────────────────
-let _speedSource = 'gps';   // 'gps' | 'ble'
+// _speedSource:  'gps' | 'ble'  — aktuelle Quelle (automatisch gesetzt)
+// _gpsOverride:  true = Nutzer erzwingt GPS auch wenn Sensor verbunden
+let _speedSource = 'gps';
+let _gpsOverride = false;
 
 function updateSpeedSrcBadge() {
     const el = document.getElementById('speed-src');
     if (!el) return;
     const L = LABELS[getLang()];
-    el.textContent = _speedSource === 'ble' ? L.srcSensor : L.srcGps;
+    el.textContent = (_speedSource === 'ble' && !_gpsOverride) ? L.srcSensor : L.srcGps;
+
+    const btn = document.getElementById('spdsrc-btn');
+    if (!btn) return;
+    if (_gpsOverride) {
+        btn.textContent      = '📡 GPS';
+        btn.style.background = '#EF9F27';
+        btn.title = getLang() === 'de' ? 'GPS erzwungen — tippen für Automatik' : 'GPS forced — tap for auto';
+    } else if (_speedSource === 'ble') {
+        btn.textContent      = '⚡ Sensor';
+        btn.style.background = '#1D9E75';
+        btn.title = getLang() === 'de' ? 'Sensor aktiv — tippen für GPS' : 'Sensor active — tap for GPS';
+    } else {
+        btn.textContent      = '📡 GPS';
+        btn.style.background = '#E24B4A';
+        btn.title = getLang() === 'de' ? 'Kein Sensor — GPS aktiv' : 'No sensor — GPS active';
+    }
 }
 
 // ── Fahrt-Steuerung ───────────────────────────────────────────────────────────
@@ -227,7 +246,8 @@ function saveCurrentRide() {
 // ── GPS-Callback ──────────────────────────────────────────────────────────────
 window.updateGps = function(data) {
     const d = typeof data === 'string' ? JSON.parse(data) : data;
-    if (_speedSource === 'gps') {
+    // GPS-Speed anzeigen wenn: kein Sensor verbunden ODER Override aktiv
+    if (_speedSource === 'gps' || _gpsOverride) {
         const el = document.getElementById('v-spd');
         if (el) el.textContent = d.speed.toFixed(1);
     }
@@ -281,30 +301,31 @@ window.updateGps = function(data) {
 
 // ── Barometer-Callback ────────────────────────────────────────────────────────
 // Wird über updateFromService geliefert (TrackingService läuft im Hintergrund)
-// Separater window.updateBaro wird nicht mehr benötigt.
-// speed === null → Sensor getrennt, GPS-Fallback aktiv
-window.updateCscSpeed = function(data) {
+function updateCscSpeed(data) {
     const d = typeof data === 'string' ? JSON.parse(data) : data;
     if (d.speed === null || d.speed === undefined) {
         _speedSource = 'gps';
     } else {
         _speedSource = 'ble';
-        const el = document.getElementById('v-spd');
-        if (el) el.textContent = d.speed.toFixed(1);
-        if (_rideState === 'running' && d.speed > _rideMaxSpd) {
+        if (!_gpsOverride) {
+            const el = document.getElementById('v-spd');
+            if (el) el.textContent = d.speed.toFixed(1);
+        }
+        if (_rideState === 'running' && d.speed > _rideMaxSpd && !_gpsOverride) {
             _rideMaxSpd = d.speed;
             const mEl = document.getElementById('v-maxspd'); if (mEl) mEl.textContent = _rideMaxSpd.toFixed(1);
         }
     }
     updateSpeedSrcBadge();
-};
+}
+window.updateCscSpeed = updateCscSpeed;
 
 // ── Service-Sync (TrackingService, 1×/s) ──────────────────────────────────────
 window.updateFromService = function(data) {
     const d   = typeof data === 'string' ? JSON.parse(data) : data;
     const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
 
-    if (_speedSource === 'gps') set('v-spd', d.speed.toFixed(1));
+    if (_speedSource === 'gps' || _gpsOverride) set('v-spd', d.speed.toFixed(1));
 
     // Barometer-Status merken (einmalig beim ersten Sync gesetzt)
     if (d.baroAvailable !== undefined) _hasBaro = d.baroAvailable === true;
@@ -367,28 +388,38 @@ window.updateCadence = function(data) {
     if (_rideState === 'running' && d.cadence > 0) _rideCadences.push(d.cadence);
 };
 
-// ── CSC-Status ────────────────────────────────────────────────────────────────
-window.updateCscStatus = function(status) {
-    const L = LABELS[getLang()];
-    const cscbtn = document.getElementById('cscbtn');
-    const dot    = document.getElementById('dot');
-    const stxt   = document.getElementById('stxt');
-    if (!cscbtn) return;
-    cscbtn.classList.remove('scanning');
-    if (status === 'connected') {
-        cscbtn.dataset.status = 'connected'; cscbtn.textContent = L.btnCscDisc;
-        if (dot) dot.className = 'dot'; if (stxt) stxt.textContent = L.conn;
-    } else if (status === 'timeout') {
-        cscbtn.dataset.status = 'disconnected'; cscbtn.textContent = L.btnCscConn;
-        if (dot) dot.className = 'dot dis'; if (stxt) stxt.textContent = L.disc;
-        const el = document.getElementById('v-cad'); if (el) el.textContent = '0';
-        showToast(L.cscNotFound);
-    } else {
-        cscbtn.dataset.status = 'disconnected'; cscbtn.textContent = L.btnCscConn;
-        if (dot) dot.className = 'dot dis'; if (stxt) stxt.textContent = L.disc;
-        const el = document.getElementById('v-cad'); if (el) el.textContent = '0';
+// ── BLE Status-Callbacks ──────────────────────────────────────────────────────
+
+function setBleStatusPill(dotId, txtId, status, label) {
+    const dot = document.getElementById(dotId);
+    const txt = document.getElementById(txtId);
+    if (!dot || !txt) return;
+    const colors = { connected:'#1D9E75', disconnected:'#E24B4A', timeout:'#E24B4A', scanning:'#EF9F27' };
+    dot.style.background = colors[status] ?? '#E24B4A';
+    if (status === 'scanning')    { txt.textContent = label + ': Suche…';    dot.style.animation = 'pulse 1s ease-in-out infinite'; }
+    else if (status === 'connected')   { txt.textContent = label + ': ✓';    dot.style.animation = 'none'; }
+    else                               { txt.textContent = label + ': –';    dot.style.animation = 'none'; }
+}
+
+window.updateSpeedStatus = function(status) {
+    _sensorBtnUpdate('btn-spd-connect','dot-spd','stxt-spd', status, 'Tempo');
+    if (status === 'disconnected' || status === 'timeout') {
+        updateCscSpeed({ speed: null, source: 'gps' });
     }
     updateSpeedSrcBadge();
+};
+
+window.updateCadStatus = function(status) {
+    _sensorBtnUpdate('btn-cad-connect','dot-cad','stxt-cad', status, 'Kadenz');
+    if (status === 'disconnected' || status === 'timeout') {
+        const el = document.getElementById('v-cad'); if (el) el.textContent = '0';
+    }
+};
+
+// Rückwärtskompatibilität (falls alter Callback noch gesendet wird)
+window.updateCscStatus = function(status) {
+    window.updateSpeedStatus(status);
+    window.updateCadStatus(status);
 };
 
 window.onPermissionDenied = function() {
@@ -418,8 +449,13 @@ window.toggleWakeLock = function() {
 // ── Scan-Animation ────────────────────────────────────────────────────────────
 let _scanDotTimer = null, _scanHintTimer = null;
 function startScanAnimation() {
-    let dots = 0, el = document.getElementById('stxt');
-    _scanDotTimer  = setInterval(() => { dots=(dots+1)%4; if(el) el.textContent='Suche'+'.'.repeat(dots); }, 400);
+    let dots = 0;
+    _scanDotTimer  = setInterval(() => {
+        dots = (dots + 1) % 4;
+        const s = 'Suche' + '.'.repeat(dots);
+        const ts = document.getElementById('stxt-spd'); if (ts && ts.textContent.includes('Suche')) ts.textContent = 'Tempo: ' + s;
+        const tc = document.getElementById('stxt-cad'); if (tc && tc.textContent.includes('Suche')) tc.textContent = 'Kadenz: ' + s;
+    }, 400);
     _scanHintTimer = setTimeout(() => showToast(LABELS[getLang()].bleRetryHint), 5000);
 }
 function stopScanAnimation() {
@@ -427,49 +463,74 @@ function stopScanAnimation() {
     _scanDotTimer = null; _scanHintTimer = null;
 }
 
-// ── Sensor verbinden / trennen ────────────────────────────────────────────────
-window.onBtnCscConnect = function() {
-    const L = LABELS[getLang()];
-    const cscbtn = document.getElementById('cscbtn');
-    const dot    = document.getElementById('dot');
-    const stxt   = document.getElementById('stxt');
+window.toggleSpeedOverride = function() {
+    _gpsOverride = !_gpsOverride;
+    updateSpeedSrcBadge();
+    showToast(_gpsOverride
+        ? (getLang() === 'de' ? '📡 GPS erzwungen' : '📡 GPS forced')
+        : (getLang() === 'de' ? '⚡ Automatik (Sensor hat Vorrang)' : '⚡ Auto (sensor priority)'));
+};
+// ── Sensor-Buttons ────────────────────────────────────────────────────────────
+
+function _sensorBtnUpdate(btnId, dotId, txtId, status, label) {
+    setBleStatusPill(dotId, txtId, status, label);
+    const btn = document.getElementById(btnId);
+    if (!btn) return;
+    if (status === 'connected') {
+        btn.textContent = label === 'Tempo' ? '⚡ Trennen' : '🔄 Trennen';
+        btn.style.background = '#1D9E75';
+    } else if (status === 'scanning') {
+        btn.textContent = '…';
+        btn.style.background = '#EF9F27';
+    } else {
+        btn.textContent = label === 'Tempo' ? '⚡ Tempo' : '🔄 Kadenz';
+        btn.style.background = '';
+    }
+}
+
+window.onBtnSpeedConnect = function() {
     if (typeof NativeBridge === 'undefined') return;
-    if (cscbtn.dataset.status === 'connected') {
-        NativeBridge.stopCsc();
-        cscbtn.dataset.status = 'disconnected'; cscbtn.textContent = L.btnCscConn;
-        cscbtn.classList.remove('scanning');
-        if (dot) dot.className = 'dot dis'; if (stxt) stxt.textContent = L.disc;
-        stopScanAnimation();
-        const el = document.getElementById('v-cad'); if (el) el.textContent = '0';
-    } else if (cscbtn.dataset.status === 'scanning') {
-        // Zweiter Tipp während Scan → abbrechen und neu starten
-        NativeBridge.stopCsc();
-        stopScanAnimation();
-        cscbtn.dataset.status = 'disconnected';
-        cscbtn.classList.remove('scanning');
-        showToast(getLang()==='de' ? 'Scan wird neu gestartet…' : 'Restarting scan…');
+    const connected = document.getElementById('stxt-spd')?.textContent.includes('✓');
+    const scanning  = document.getElementById('stxt-spd')?.textContent.includes('Suche');
+    if (connected) {
+        NativeBridge.stopSpeedSensor();
+        _sensorBtnUpdate('btn-spd-connect','dot-spd','stxt-spd','disconnected','Tempo');
+    } else if (scanning) {
+        // Neustart
+        NativeBridge.stopSpeedSensor();
+        _sensorBtnUpdate('btn-spd-connect','dot-spd','stxt-spd','disconnected','Tempo');
         setTimeout(() => {
-            cscbtn.dataset.status = 'scanning'; cscbtn.classList.add('scanning');
-            if (dot) dot.className = 'dot scan';
-            startScanAnimation();
-            NativeBridge.startCsc();
+            _sensorBtnUpdate('btn-spd-connect','dot-spd','stxt-spd','scanning','Tempo');
+            NativeBridge.startSpeedScan();
         }, 800);
     } else {
-        showToast(L.btHint);
-        cscbtn.dataset.status = 'scanning'; cscbtn.classList.add('scanning');
-        if (dot) dot.className = 'dot scan';
-        startScanAnimation();
-        NativeBridge.startCsc();
-        setTimeout(() => {
-            if (cscbtn.dataset.status !== 'connected') {
-                cscbtn.dataset.status = 'disconnected'; cscbtn.classList.remove('scanning');
-                cscbtn.textContent = L.btnCscConn;
-                if (dot) dot.className = 'dot dis'; if (stxt) stxt.textContent = L.disc;
-                stopScanAnimation(); showToast(L.cscNotFound);
-            }
-        }, 31000);
+        _sensorBtnUpdate('btn-spd-connect','dot-spd','stxt-spd','scanning','Tempo');
+        NativeBridge.startSpeedScan();
     }
 };
+
+window.onBtnCadConnect = function() {
+    if (typeof NativeBridge === 'undefined') return;
+    const connected = document.getElementById('stxt-cad')?.textContent.includes('✓');
+    const scanning  = document.getElementById('stxt-cad')?.textContent.includes('Suche');
+    if (connected) {
+        NativeBridge.stopCadSensor();
+        _sensorBtnUpdate('btn-cad-connect','dot-cad','stxt-cad','disconnected','Kadenz');
+    } else if (scanning) {
+        NativeBridge.stopCadSensor();
+        _sensorBtnUpdate('btn-cad-connect','dot-cad','stxt-cad','disconnected','Kadenz');
+        setTimeout(() => {
+            _sensorBtnUpdate('btn-cad-connect','dot-cad','stxt-cad','scanning','Kadenz');
+            NativeBridge.startCadenceScan();
+        }, 800);
+    } else {
+        _sensorBtnUpdate('btn-cad-connect','dot-cad','stxt-cad','scanning','Kadenz');
+        NativeBridge.startCadenceScan();
+    }
+};
+
+// Fallback: Header-Pillen tippen startet ebenfalls passenden Scan
+window.onBtnCscConnect = function() { window.onBtnSpeedConnect(); };
 
 // ── OsmAnd ────────────────────────────────────────────────────────────────────
 window.onBtnOsmAnd = function() {
@@ -487,7 +548,7 @@ window.saveWheelCircumference = function() {
 };
 
 // ── Screen-1-Card: Höhe ↔ Trittfrequenz (Long-Press Toggle) ──────────────────
-let _card1Mode = localStorage.getItem('navinci_card1') || 'alt'; // 'alt' | 'cad'
+let _card1Mode = localStorage.getItem('navinci_card1') || 'clock'; // 'clock' | 'alt' | 'cad'
 
 function initCard1Toggle() {
     const card = document.getElementById('card1');
@@ -507,10 +568,11 @@ function initCard1Toggle() {
 }
 
 function toggleCard1() {
-    _card1Mode = _card1Mode === 'alt' ? 'cad' : 'alt';
+    if      (_card1Mode === 'clock') _card1Mode = 'alt';
+    else if (_card1Mode === 'alt')   _card1Mode = 'cad';
+    else                             _card1Mode = 'clock';
     localStorage.setItem('navinci_card1', _card1Mode);
     updateCard1Labels();
-    // Kurzes visuelles Feedback
     const card = document.getElementById('card1');
     if (card) { card.style.opacity = '0.4'; setTimeout(() => card.style.opacity = '', 200); }
 }
@@ -521,17 +583,23 @@ function updateCard1Labels() {
     const val  = document.getElementById('v-card1');
     const unit = document.getElementById('u-card1');
     if (!lbl || !val || !unit) return;
-    if (_card1Mode === 'alt') {
+    if (_card1Mode === 'clock') {
+        lbl.textContent  = L.clock;
+        unit.textContent = '';
+        // Aktuelle Uhrzeit sofort anzeigen
+        const n = new Date();
+        val.textContent = String(n.getHours()).padStart(2,'0') + ':' + String(n.getMinutes()).padStart(2,'0');
+        val.style.fontSize = '34px';
+    } else if (_card1Mode === 'alt') {
         lbl.textContent  = L.alt;
         unit.textContent = 'm';
-        // Aktuellen Wert von v-alt übernehmen (falls bereits sichtbar)
-        const src = document.getElementById('v-alt-hidden');
-        val.textContent  = src ? src.textContent : '--';
+        val.textContent  = document.getElementById('v-alt-hidden')?.textContent ?? '--';
+        val.style.fontSize = '';
     } else {
         lbl.textContent  = L.cad;
         unit.textContent = 'rpm';
-        const src = document.getElementById('v-cad-hidden');
-        val.textContent  = src ? src.textContent : '0';
+        val.textContent  = document.getElementById('v-cad-hidden')?.textContent ?? '0';
+        val.style.fontSize = '';
     }
 }
 // ── Benutzerdefinierte Split-Screen-App ───────────────────────────────────────
@@ -690,6 +758,11 @@ function fmtDuration(s) {
 function updateClock() {
     const n=new Date(), el=document.getElementById('v-clock');
     if (el) el.textContent = String(n.getHours()).padStart(2,'0')+':'+String(n.getMinutes()).padStart(2,'0');
+    // Card1 im Uhrzeit-Modus ebenfalls aktualisieren
+    if (_card1Mode === 'clock') {
+        const c = document.getElementById('v-card1');
+        if (c) c.textContent = String(n.getHours()).padStart(2,'0')+':'+String(n.getMinutes()).padStart(2,'0');
+    }
 }
 updateClock(); setInterval(updateClock, 1000);
 

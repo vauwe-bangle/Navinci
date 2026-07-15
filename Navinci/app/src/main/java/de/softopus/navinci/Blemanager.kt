@@ -21,104 +21,153 @@ import android.os.Looper
 import android.util.Log
 import java.util.UUID
 
+/**
+ * BleManager — zwei unabhängige CSC-Sensor-Slots
+ *
+ * scanForSpeed()   → Slot 1 (Radsensor / Wheel Revolution Data)
+ * scanForCadence() → Slot 2 (Kurbelsensor / Crank Revolution Data)
+ *
+ * Ein kombinierter Sensor (Bit0+Bit1) über scanForSpeed() verbunden
+ * liefert automatisch auch Kadenz.
+ *
+ * Fix 99 km/h: MIN_DTIME filtert Burst-Pakete beim Connect,
+ * MAX_SPEED verwirft unplausible Werte.
+ */
 class BleManager(
-    private val activity: Activity,
-    private val onSpeed:     ((Float) -> Unit)? = null,   // km/h vom Radsensor
-    private val onCadence:   ((Int)   -> Unit)? = null,   // RPM vom Kurbelsensor
-    private val onCscStatus: ((String) -> Unit)? = null   // "connected" | "disconnected" | "timeout"
+    private val activity:      Activity,
+    private val onSpeed:       ((Float)  -> Unit)? = null,
+    private val onCadence:     ((Int)    -> Unit)? = null,
+    private val onSpeedStatus: ((String) -> Unit)? = null,
+    private val onCadStatus:   ((String) -> Unit)? = null
 ) {
     private val TAG = "BleManager"
 
-    private val bluetoothManager =
-        activity.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
-    private val bluetoothAdapter = bluetoothManager.adapter
-    private var gattCsc: BluetoothGatt? = null
-    private var isScanning = false
+    private val bluetoothAdapter =
+        (activity.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
 
-    private val handler           = Handler(Looper.getMainLooper())
+    private var gattSpeed:   BluetoothGatt? = null
+    private var gattCadence: BluetoothGatt? = null
+
+    private var scanningSpeed   = false
+    private var scanningCadence = false
+
+    private val handler          = Handler(Looper.getMainLooper())
     private var cadenceResetJob: Runnable? = null
 
-    // Radumfang in Metern (Standard: 700c × 25mm ≈ 2.105 m)
-    // Wird von MainActivity per setWheelCircumference() aktualisiert
-    var wheelCircumference = 2.105f
+    var wheelCircumference = 2.105f   // Meter
 
-    // ── CSC GATT-UUIDs (Bluetooth SIG Standard) ───────────────────────────
+    // CSC GATT-UUIDs (Bluetooth SIG Standard)
     private val CSC_SERVICE = UUID.fromString("00001816-0000-1000-8000-00805f9b34fb")
     private val CSC_CHAR    = UUID.fromString("00002a5b-0000-1000-8000-00805f9b34fb")
     private val CCCD        = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 
-    // CSC-Zustandsgrößen für differentielle Berechnung
-    private var lastWheelRevs = -1L
-    private var lastWheelTime = -1        // 1/1024 s
-    private var lastCrankRevs = -1
-    private var lastCrankTime = -1        // 1/1024 s
+    // CSC-Zustand
+    private var lastWheelRevs = -1L;  private var lastWheelTime = -1
+    private var lastCrankRevs = -1;   private var lastCrankTime = -1
+
+    // Fix 99 km/h
+    private val MIN_DTIME = 50       // 1/1024 s ≈ 49 ms — filtert Burst-Pakete
+    private val MAX_SPEED = 120f     // km/h — Plausibilitätsgrenze
 
     private val scanSettings = ScanSettings.Builder()
-        .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
-        .build()
+        .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build()
 
-    // ── Scan ──────────────────────────────────────────────────────────────
+    // ── Scan Tempo-Sensor ─────────────────────────────────────────────────
 
-    fun scanCsc() {
-        // Laufenden Scan zuerst stoppen (ermöglicht Neustart per Tastendruck)
-        if (isScanning) {
-            bluetoothAdapter.bluetoothLeScanner?.stopScan(scanCscCallback)
-            isScanning = false
+    fun scanForSpeed() {
+        if (scanningSpeed) {
+            bluetoothAdapter.bluetoothLeScanner?.stopScan(speedScanCallback)
+            scanningSpeed = false
         }
-        Log.d(TAG, "Starte BLE-Scan (CSC)…")
-        bluetoothAdapter.bluetoothLeScanner.startScan(null, scanSettings, scanCscCallback)
-        isScanning = true
+        Log.d(TAG, "Scan Tempo-Sensor…")
+        handler.post { onSpeedStatus?.invoke("scanning") }
+        bluetoothAdapter.bluetoothLeScanner.startScan(null, scanSettings, speedScanCallback)
+        scanningSpeed = true
         handler.postDelayed({
-            if (isScanning) {
-                bluetoothAdapter.bluetoothLeScanner.stopScan(scanCscCallback)
-                isScanning = false
-                if (gattCsc == null) {
-                    Log.d(TAG, "CSC Scan Timeout")
-                    onCscStatus?.invoke("timeout")
-                }
+            if (scanningSpeed) {
+                bluetoothAdapter.bluetoothLeScanner.stopScan(speedScanCallback)
+                scanningSpeed = false
+                Log.d(TAG, "Tempo-Sensor: Timeout")
+                handler.post { onSpeedStatus?.invoke("timeout") }
             }
         }, 30_000)
     }
 
-    private val scanCscCallback = object : ScanCallback() {
+    private val speedScanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             val uuids = result.scanRecord?.serviceUuids ?: return
-            if (uuids.any { it.uuid == CSC_SERVICE }) {
-                Log.d(TAG, "CSC Sensor gefunden: ${result.device.name} (${result.device.address})")
-                bluetoothAdapter.bluetoothLeScanner.stopScan(this)
-                isScanning = false
-                connectCsc(result.device)
-            }
+            if (!uuids.any { it.uuid == CSC_SERVICE }) return
+            Log.d(TAG, "Tempo-Sensor gefunden: ${result.device.name} (${result.device.address})")
+            bluetoothAdapter.bluetoothLeScanner.stopScan(this)
+            scanningSpeed = false
+            gattSpeed = result.device.connectGatt(
+                activity, false, makeGattCallback(isSpeed = true), BluetoothDevice.TRANSPORT_LE)
         }
         override fun onScanFailed(errorCode: Int) {
-            Log.e(TAG, "CSC Scan fehlgeschlagen: $errorCode")
-            isScanning = false
-            onCscStatus?.invoke("timeout")
+            Log.e(TAG, "Tempo-Scan fehlgeschlagen: $errorCode")
+            scanningSpeed = false
+            handler.post { onSpeedStatus?.invoke("timeout") }
         }
     }
 
-    // ── Verbinden ─────────────────────────────────────────────────────────
+    // ── Scan Kadenz-Sensor ────────────────────────────────────────────────
 
-    private fun connectCsc(device: BluetoothDevice) {
-        Log.d(TAG, "Verbinde CSC: ${device.name}")
-        gattCsc = device.connectGatt(activity, false, gattCscCallback)
+    fun scanForCadence() {
+        if (scanningCadence) {
+            bluetoothAdapter.bluetoothLeScanner?.stopScan(cadenceScanCallback)
+            scanningCadence = false
+        }
+        Log.d(TAG, "Scan Kadenz-Sensor…")
+        handler.post { onCadStatus?.invoke("scanning") }
+        bluetoothAdapter.bluetoothLeScanner.startScan(null, scanSettings, cadenceScanCallback)
+        scanningCadence = true
+        handler.postDelayed({
+            if (scanningCadence) {
+                bluetoothAdapter.bluetoothLeScanner.stopScan(cadenceScanCallback)
+                scanningCadence = false
+                Log.d(TAG, "Kadenz-Sensor: Timeout")
+                handler.post { onCadStatus?.invoke("timeout") }
+            }
+        }, 30_000)
     }
 
-    private val gattCscCallback = object : BluetoothGattCallback() {
+    private val cadenceScanCallback = object : ScanCallback() {
+        override fun onScanResult(callbackType: Int, result: ScanResult) {
+            val uuids = result.scanRecord?.serviceUuids ?: return
+            if (!uuids.any { it.uuid == CSC_SERVICE }) return
+            Log.d(TAG, "Kadenz-Sensor gefunden: ${result.device.name} (${result.device.address})")
+            bluetoothAdapter.bluetoothLeScanner.stopScan(this)
+            scanningCadence = false
+            gattCadence = result.device.connectGatt(
+                activity, false, makeGattCallback(isSpeed = false), BluetoothDevice.TRANSPORT_LE)
+        }
+        override fun onScanFailed(errorCode: Int) {
+            Log.e(TAG, "Kadenz-Scan fehlgeschlagen: $errorCode")
+            scanningCadence = false
+            handler.post { onCadStatus?.invoke("timeout") }
+        }
+    }
+
+    // ── GATT Callback Factory ─────────────────────────────────────────────
+
+    private fun makeGattCallback(isSpeed: Boolean) = object : BluetoothGattCallback() {
 
         override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
-                    Log.d(TAG, "CSC verbunden")
+                    Log.d(TAG, "${if (isSpeed) "Tempo" else "Kadenz"}-Sensor verbunden")
                     g.discoverServices()
-                    handler.post { onCscStatus?.invoke("connected") }
                 }
                 BluetoothProfile.STATE_DISCONNECTED -> {
-                    Log.d(TAG, "CSC getrennt (status=$status)")
-                    gattCsc = null
-                    resetCscState()
-                    cadenceResetJob?.let { handler.removeCallbacks(it) }
-                    handler.post { onCscStatus?.invoke("disconnected") }
+                    Log.d(TAG, "${if (isSpeed) "Tempo" else "Kadenz"}-Sensor getrennt")
+                    g.close()
+                    if (isSpeed) {
+                        gattSpeed = null; resetWheelState()
+                        handler.post { onSpeedStatus?.invoke("disconnected") }
+                    } else {
+                        gattCadence = null; resetCrankState()
+                        handler.post { onCadStatus?.invoke("disconnected") }
+                    }
                 }
             }
         }
@@ -126,137 +175,122 @@ class BleManager(
         override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
             if (status != BluetoothGatt.GATT_SUCCESS) return
             val ch = g.getService(CSC_SERVICE)?.getCharacteristic(CSC_CHAR) ?: run {
-                Log.e(TAG, "CSC Characteristic nicht gefunden")
-                return
+                Log.e(TAG, "CSC Characteristic nicht gefunden"); return
             }
             g.setCharacteristicNotification(ch, true)
             handler.postDelayed({
                 val desc = ch.getDescriptor(CCCD) ?: return@postDelayed
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU)
                     g.writeDescriptor(desc, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
-                } else {
+                else {
                     @Suppress("DEPRECATION")
                     desc.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
                     @Suppress("DEPRECATION")
                     g.writeDescriptor(desc)
                 }
-                Log.d(TAG, "CSC Notifications aktiviert")
-            }, 500)
+                Log.d(TAG, "${if (isSpeed) "Tempo" else "Kadenz"}-Sensor: Notifications aktiviert")
+            }, 600)
         }
 
-        // API 33+
         override fun onCharacteristicChanged(
             g: BluetoothGatt, ch: BluetoothGattCharacteristic, value: ByteArray
-        ) { parseCscPacket(value) }
+        ) { if (ch.uuid == CSC_CHAR) parseCsc(value, isSpeed) }
 
-        // API < 33
         @Suppress("DEPRECATION")
         override fun onCharacteristicChanged(
             g: BluetoothGatt, ch: BluetoothGattCharacteristic
-        ) { parseCscPacket(ch.value) }
+        ) { if (ch.uuid == CSC_CHAR) parseCsc(ch.value, isSpeed) }
     }
 
-    // ── CSC Measurement Parser (Bluetooth SIG 0x2A5B) ────────────────────
-    //
-    // Byte 0: Flags
-    //   Bit 0 = Wheel Revolution Data present
-    //   Bit 1 = Crank Revolution Data present
-    //
-    // Wheel (wenn Bit 0):
-    //   Byte 1–4  Cumulative Wheel Revolutions  (uint32, LE)
-    //   Byte 5–6  Last Wheel Event Time          (uint16, 1/1024 s, LE)
-    //
-    // Crank (wenn Bit 1, nach Wheel-Block):
-    //   Byte x+0–1  Cumulative Crank Revolutions (uint16, LE)
-    //   Byte x+2–3  Last Crank Event Time         (uint16, 1/1024 s, LE)
+    // ── CSC Parser ────────────────────────────────────────────────────────
 
-    private fun parseCscPacket(value: ByteArray) {
+    private fun parseCsc(value: ByteArray, isSpeedSlot: Boolean) {
         if (value.isEmpty()) return
-        val flags      = value[0].toInt() and 0xFF
-        val wheelPres  = (flags and 0x01) != 0
-        val crankPres  = (flags and 0x02) != 0
-        var offset     = 1
+        val flags     = value[0].toInt() and 0xFF
+        val wheelPres = (flags and 0x01) != 0
+        val crankPres = (flags and 0x02) != 0
+        var off = 1
 
-        // ── Radgeschwindigkeit ────────────────────────────────────────────
-        if (wheelPres && value.size >= offset + 6) {
-            val cumWheelRevs =
-                (value[offset  ].toLong() and 0xFF) or
-                        ((value[offset+1].toLong() and 0xFF) shl 8) or
-                        ((value[offset+2].toLong() and 0xFF) shl 16) or
-                        ((value[offset+3].toLong() and 0xFF) shl 24)
-            val wheelTime =
-                (value[offset+4].toInt() and 0xFF) or
-                        ((value[offset+5].toInt() and 0xFF) shl 8)
+        // ── Wheel Revolution Data ─────────────────────────────────────────
+        if (wheelPres && value.size >= off + 6) {
+            val cumRev =
+                (value[off  ].toLong() and 0xFF) or
+                        ((value[off+1].toLong() and 0xFF) shl 8) or
+                        ((value[off+2].toLong() and 0xFF) shl 16) or
+                        ((value[off+3].toLong() and 0xFF) shl 24)
+            val evtTime = (value[off+4].toInt() and 0xFF) or
+                    ((value[off+5].toInt() and 0xFF) shl 8)
 
             if (lastWheelRevs >= 0 && lastWheelTime >= 0) {
-                val dRev  = cumWheelRevs - lastWheelRevs
-                var dTime = wheelTime - lastWheelTime
-                if (dTime < 0) dTime += 65536          // 16-Bit-Überlauf
-
-                if (dRev > 0 && dTime > 0) {
-                    // v [m/s] = (Umfang × ΔRev) / (ΔTime / 1024)  →  [km/h]
-                    val speedKmh = (wheelCircumference * dRev) / (dTime / 1024f) * 3.6f
-                    Log.d(TAG, "Speed: ${"%.1f".format(speedKmh)} km/h")
-                    onSpeed?.invoke(speedKmh)
-                } else if (dRev == 0L && dTime > 0) {
-                    onSpeed?.invoke(0f)   // Stillstand
-                }
-            }
-            lastWheelRevs = cumWheelRevs
-            lastWheelTime = wheelTime
-            offset += 6
-        }
-
-        // ── Trittfrequenz ─────────────────────────────────────────────────
-        if (crankPres && value.size >= offset + 4) {
-            val cumCrankRevs =
-                (value[offset  ].toInt() and 0xFF) or
-                        ((value[offset+1].toInt() and 0xFF) shl 8)
-            val crankTime =
-                (value[offset+2].toInt() and 0xFF) or
-                        ((value[offset+3].toInt() and 0xFF) shl 8)
-
-            if (lastCrankRevs >= 0 && lastCrankTime >= 0) {
-                val dRev  = (cumCrankRevs - lastCrankRevs + 65536) % 65536
-                var dTime = crankTime - lastCrankTime
+                val dRev  = cumRev - lastWheelRevs
+                var dTime = evtTime - lastWheelTime
                 if (dTime < 0) dTime += 65536
 
-                if (dRev > 0 && dTime > 0) {
-                    val rpm = (dRev * 1024 * 60) / dTime
-                    Log.d(TAG, "Cadence: $rpm rpm")
-                    onCadence?.invoke(rpm)
-                } else if (dRev == 0) {
-                    onCadence?.invoke(0)
+                if (dRev > 0 && dTime >= MIN_DTIME) {
+                    val speedKmh = (wheelCircumference * dRev) / (dTime / 1024f) * 3.6f
+                    if (speedKmh <= MAX_SPEED) {
+                        Log.d(TAG, "Speed: ${"%.1f".format(speedKmh)} km/h")
+                        handler.post {
+                            onSpeedStatus?.invoke("connected")
+                            onSpeed?.invoke(speedKmh)
+                        }
+                    } else {
+                        Log.w(TAG, "Speed unplausibel: ${"%.1f".format(speedKmh)} km/h → ignoriert")
+                    }
+                } else if (dRev == 0L && dTime >= MIN_DTIME) {
+                    handler.post { onSpeed?.invoke(0f) }
                 }
             }
-            lastCrankRevs = cumCrankRevs
-            lastCrankTime = crankTime
+            lastWheelRevs = cumRev; lastWheelTime = evtTime
+            off += 6
+        }
 
-            // Stillstand-Fallback: kein neues Paket nach 3 s → 0 rpm
-            cadenceResetJob?.let { handler.removeCallbacks(it) }
-            cadenceResetJob = Runnable {
-                Log.d(TAG, "Cadence Stillstand → 0 rpm")
-                onCadence?.invoke(0)
+        // ── Crank Revolution Data ─────────────────────────────────────────
+        if (crankPres && value.size >= off + 4) {
+            val cumRev  = (value[off  ].toInt() and 0xFF) or ((value[off+1].toInt() and 0xFF) shl 8)
+            val evtTime = (value[off+2].toInt() and 0xFF) or ((value[off+3].toInt() and 0xFF) shl 8)
+
+            if (lastCrankRevs >= 0 && lastCrankTime >= 0) {
+                val dRev  = (cumRev - lastCrankRevs + 65536) % 65536
+                var dTime = evtTime - lastCrankTime
+                if (dTime < 0) dTime += 65536
+
+                if (dRev > 0 && dTime >= MIN_DTIME) {
+                    val rpm = (dRev * 1024 * 60) / dTime
+                    Log.d(TAG, "Cadence: $rpm rpm")
+                    handler.post {
+                        onCadStatus?.invoke("connected")
+                        onCadence?.invoke(rpm)
+                    }
+                } else if (dRev == 0 && dTime >= MIN_DTIME) {
+                    handler.post { onCadence?.invoke(0) }
+                }
             }
+            lastCrankRevs = cumRev; lastCrankTime = evtTime
+
+            cadenceResetJob?.let { handler.removeCallbacks(it) }
+            cadenceResetJob = Runnable { handler.post { onCadence?.invoke(0) } }
             handler.postDelayed(cadenceResetJob!!, 3000)
         }
     }
 
     // ── Trennen ───────────────────────────────────────────────────────────
 
-    fun disconnectCsc() {
-        cadenceResetJob?.let { handler.removeCallbacks(it) }
-        gattCsc?.disconnect()
-        gattCsc?.close()
-        gattCsc = null
-        resetCscState()
-        Log.d(TAG, "CSC getrennt")
+    fun disconnectSpeed() {
+        gattSpeed?.disconnect(); gattSpeed?.close(); gattSpeed = null
+        resetWheelState()
+        Log.d(TAG, "Tempo-Sensor getrennt")
     }
 
-    private fun resetCscState() {
-        lastWheelRevs = -1L
-        lastWheelTime = -1
-        lastCrankRevs = -1
-        lastCrankTime = -1
+    fun disconnectCadence() {
+        cadenceResetJob?.let { handler.removeCallbacks(it) }
+        gattCadence?.disconnect(); gattCadence?.close(); gattCadence = null
+        resetCrankState()
+        Log.d(TAG, "Kadenz-Sensor getrennt")
     }
+
+    fun disconnectCsc() { disconnectSpeed(); disconnectCadence() }
+
+    private fun resetWheelState() { lastWheelRevs = -1L; lastWheelTime = -1 }
+    private fun resetCrankState() { lastCrankRevs = -1;  lastCrankTime = -1 }
 }

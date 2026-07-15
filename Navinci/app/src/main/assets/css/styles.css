@@ -38,8 +38,8 @@ body {
 .hdr {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 0 0 12px;
+  gap: 6px;
+  padding: 8px 0 10px;
   border-bottom: 1px solid var(--accent-mid);
   margin-bottom: 14px;
 }

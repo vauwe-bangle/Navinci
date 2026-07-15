@@ -11,23 +11,50 @@
 
     <!-- Header -->
     <div class="hdr">
-        <div class="pill">
-            <div class="dot dis" id="dot"></div>
-            <span id="stxt">Getrennt</span>
-        </div>
-        <div class="ctrl">
-            <div style="display:flex;gap:5px;">
-                <button class="tbtn on" data-theme="teal"  style="background:#1D9E75;" onclick="setTheme('teal',this)"></button>
-                <button class="tbtn"    data-theme="amber" style="background:#EF9F27;" onclick="setTheme('amber',this)"></button>
-                <button class="tbtn"    data-theme="coral" style="background:#D85A30;" onclick="setTheme('coral',this)"></button>
-            </div>
-            <button id="wakelock-btn" onclick="toggleWakeLock()"
-                    title="Display: Ruhemodus"
-                    style="background:none;border:none;cursor:pointer;
-                     font-size:22px;padding:2px 4px;line-height:1;
-                     opacity:0.35;filter:grayscale(1);transition:all .3s;">☀</button>
-            <button class="lbtn" id="lbtn" onclick="toggleLang()">EN</button>
-        </div>
+        <!-- App-Name -->
+        <span style="font-size:15px;font-weight:800;letter-spacing:.08em;
+                 color:var(--accent-text);flex-shrink:0;">NAVINCI</span>
+
+        <!-- Wake Lock -->
+        <button id="wakelock-btn" onclick="toggleWakeLock()"
+                style="background:none;border:none;cursor:pointer;font-size:20px;
+                   padding:6px 8px;line-height:1;opacity:0.35;filter:grayscale(1);
+                   transition:all .3s;-webkit-tap-highlight-color:transparent;flex-shrink:0;">☀</button>
+
+        <!-- BLE Tempo-Sensor Status -->
+        <button id="spd-status-btn" onclick="onBtnCscConnect()"
+                style="display:flex;align-items:center;gap:4px;
+                   background:var(--white);border:1px solid var(--accent-mid);
+                   border-radius:20px;padding:5px 9px;cursor:pointer;
+                   -webkit-tap-highlight-color:transparent;flex:1;min-width:0;">
+            <div id="dot-spd" style="width:7px;height:7px;border-radius:50%;
+                                background:#E24B4A;flex-shrink:0;"></div>
+            <span id="stxt-spd" style="font-size:10px;font-weight:600;
+                                   color:var(--accent-text);white-space:nowrap;
+                                   overflow:hidden;text-overflow:ellipsis;">Tempo</span>
+        </button>
+
+        <!-- BLE Kadenz-Sensor Status -->
+        <button id="cad-status-btn" onclick="onBtnCscConnect()"
+                style="display:flex;align-items:center;gap:4px;
+                   background:var(--white);border:1px solid var(--accent-mid);
+                   border-radius:20px;padding:5px 9px;cursor:pointer;
+                   -webkit-tap-highlight-color:transparent;flex:1;min-width:0;">
+            <div id="dot-cad" style="width:7px;height:7px;border-radius:50%;
+                                background:#E24B4A;flex-shrink:0;"></div>
+            <span id="stxt-cad" style="font-size:10px;font-weight:600;
+                                   color:var(--accent-text);white-space:nowrap;
+                                   overflow:hidden;text-overflow:ellipsis;">Kadenz</span>
+        </button>
+
+        <!-- Geschwindigkeitsquelle -->
+        <button id="spdsrc-btn" onclick="toggleSpeedOverride()"
+                style="border:none;cursor:pointer;border-radius:20px;flex-shrink:0;
+                   font-size:11px;font-weight:700;padding:5px 10px;line-height:1;
+                   background:#E24B4A;color:#fff;white-space:nowrap;
+                   transition:all .3s;-webkit-tap-highlight-color:transparent;">
+            📡 GPS
+        </button>
     </div>
 
     <!-- Screen 1: Live -->
@@ -82,10 +109,12 @@
             </button>
         </div>
 
-        <!-- CSC-Sensor + OsmAnd + benutzerdefinierte App -->
+        <!-- Sensor-Buttons + OsmAnd -->
         <div style="display:flex;gap:8px;margin-top:4px;">
-            <button class="dbtn" id="cscbtn" data-status="disconnected"
-                    onclick="onBtnCscConnect()" style="flex:1;">Sensor verbinden</button>
+            <button class="dbtn" id="btn-spd-connect"
+                    onclick="onBtnSpeedConnect()" style="flex:1;">⚡ Tempo</button>
+            <button class="dbtn" id="btn-cad-connect"
+                    onclick="onBtnCadConnect()"  style="flex:1;">🔄 Kadenz</button>
             <button class="dbtn osmand-btn"
                     onclick="onBtnOsmAnd()" style="flex:1;">🗺 OsmAnd</button>
         </div>
@@ -98,6 +127,22 @@
 
     <!-- Screen 2: Stats -->
     <div id="scr-stats" style="display:none;">
+
+        <!-- Erscheinungsbild & Sprache -->
+        <div class="note-card" style="background:var(--white);border-color:var(--accent-mid);margin-bottom:10px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;">
+                <div style="display:flex;align-items:center;gap:8px;">
+          <span style="font-size:11px;font-weight:600;color:var(--accent-text);
+                       text-transform:uppercase;letter-spacing:.06em;">Farbthema</span>
+                    <button class="tbtn on" data-theme="teal"  style="background:#1D9E75;width:22px;height:22px;" onclick="setTheme('teal',this)"></button>
+                    <button class="tbtn"    data-theme="amber" style="background:#EF9F27;width:22px;height:22px;" onclick="setTheme('amber',this)"></button>
+                    <button class="tbtn"    data-theme="coral" style="background:#D85A30;width:22px;height:22px;" onclick="setTheme('coral',this)"></button>
+                </div>
+                <button class="lbtn" id="lbtn" onclick="toggleLang()"
+                        style="font-size:13px;padding:5px 14px;">DE</button>
+            </div>
+        </div>
+
         <div class="grid">
             <div class="card">
                 <div class="clabel" id="l-avgspd">Ø Geschwindigkeit</div>

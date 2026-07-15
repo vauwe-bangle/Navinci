@@ -15,6 +15,7 @@ import android.os.Looper
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -46,9 +47,15 @@ class MainActivity : AppCompatActivity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
-
-        webView = findViewById(R.id.webView)
+        // WebView programmatisch erstellen — kein XML-Layout nötig
+        webView = WebView(this)
+        val layout = FrameLayout(this).apply {
+            addView(webView, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            ))
+        }
+        setContentView(layout)
         webView.addJavascriptInterface(Bridge(this), "NativeBridge")
 
         webView.settings.apply {
@@ -71,19 +78,18 @@ class MainActivity : AppCompatActivity() {
         webView.loadUrl("file:///android_asset/index.html")
 
         bleManager = BleManager(
-            activity    = this,
-            // Geschwindigkeit aus Radsensor (BLE) → JS
-            onSpeed     = { kmh ->
+            activity      = this,
+            onSpeed       = { kmh ->
                 val json = "{\"speed\":${"%.1f".format(java.util.Locale.US, kmh)},\"source\":\"ble\"}"
                 sendToJS("updateCscSpeed", json)
             },
-            onCadence   = { rpm -> sendToJS("updateCadence", "{\"cadence\":$rpm}") },
-            onCscStatus = { status ->
-                // Bei Trennung: JS auf GPS-Fallback umschalten
+            onCadence     = { rpm -> sendToJS("updateCadence", "{\"cadence\":$rpm}") },
+            onSpeedStatus = { status ->
                 if (status == "disconnected" || status == "timeout")
                     sendToJS("updateCscSpeed", "{\"speed\":null,\"source\":\"gps\"}")
-                sendToJS("updateCscStatus", "\"$status\"")
-            }
+                sendToJS("updateSpeedStatus", "\"$status\"")
+            },
+            onCadStatus   = { status -> sendToJS("updateCadStatus", "\"$status\"") }
         )
 
         gpsManager  = GpsManager(this)  { json -> sendToJS("updateGps",  json) }
@@ -211,14 +217,26 @@ class MainActivity : AppCompatActivity() {
 @Suppress("unused")
 class Bridge(private val ctx: MainActivity) {
 
-    /** CSC-Sensor suchen und verbinden */
+    /** Tempo-Sensor suchen und verbinden (Slot 1) */
     @JavascriptInterface
-    fun startCsc() {
-        if (ctx.hasPermissions()) ctx.bleManager.scanCsc() else ctx.checkAndRequestPermissions()
+    fun startSpeedScan() {
+        if (ctx.hasPermissions()) ctx.bleManager.scanForSpeed() else ctx.checkAndRequestPermissions()
     }
 
-    /** CSC-Sensor trennen */
-    @JavascriptInterface fun stopCsc() { ctx.bleManager.disconnectCsc() }
+    /** Kadenz-Sensor suchen und verbinden (Slot 2) */
+    @JavascriptInterface
+    fun startCadenceScan() {
+        if (ctx.hasPermissions()) ctx.bleManager.scanForCadence() else ctx.checkAndRequestPermissions()
+    }
+
+    /** Tempo-Sensor trennen */
+    @JavascriptInterface fun stopSpeedSensor()  { ctx.bleManager.disconnectSpeed() }
+
+    /** Kadenz-Sensor trennen */
+    @JavascriptInterface fun stopCadSensor()    { ctx.bleManager.disconnectCadence() }
+
+    /** Beide Sensoren trennen */
+    @JavascriptInterface fun stopCsc()          { ctx.bleManager.disconnectCsc() }
 
     /** OsmAnd öffnen */
     @JavascriptInterface fun launchOsmAnd() { ctx.runOnUiThread { ctx.launchOsmAnd() } }
