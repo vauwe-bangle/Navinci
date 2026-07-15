@@ -2,7 +2,7 @@
 
 ## Screen 1: Live
 
-<img src="../../_resources/94058393b4ac8ff2fbd4acb7399e8971-2.png" alt="94058393b4ac8ff2fbd4acb7399e8971.png" width="538" height="527">
+<img src="../../_resources/screen1-Jul26.png" alt="screen1-Jul26.png" width="394" height="451">
 
 * * *
 
@@ -93,3 +93,16 @@ Der Button ist sichtbar:
 | 🔴 Rot | 📡  | Kein Sensor — GPS aktiv |
 | 🟢 Grün | ⚡   | Sensor verbunden — Automatik |
 | 🟡 Gelb | 📡  | GPS-Override aktiv |
+
+&nbsp;
+
+**Energieverbrauch GPS vs. Bluetooth:**
+
+**BLE-Sensor benötigt deutlich weniger Energie** — das "LE" in BLE steht für *Low Energy*.
+
+|     | GPS | BLE-Sensor |
+| --- | --- | --- |
+| Stromverbrauch | hoch (Dauerbetrieb Empfänger) | sehr gering |
+| Update-Rate | ~1 Hz | ~1–4 Hz (ereignisgesteuert) |
+| Akkuverbrauch Handy | spürbar (bekannter GPS-Drain) | kaum messbar |
+| Zusatzverbrauch | Satellitenempfang, Positionsberechnung | nur kurze Funkpakete |
