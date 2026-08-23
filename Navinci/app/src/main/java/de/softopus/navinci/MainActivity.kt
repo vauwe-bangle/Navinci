@@ -103,7 +103,7 @@ class MainActivity : AppCompatActivity() {
             val intent = packageManager.getLaunchIntentForPackage(pkg) ?: continue
             intent.addFlags(
                 Intent.FLAG_ACTIVITY_NEW_TASK or
-                        Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT  // öffnet im anderen Split-Screen-Feld
+                Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT  // öffnet im anderen Split-Screen-Feld
             )
             // Hinweis wenn Split-Screen noch nicht aktiv
             if (!isInMultiWindowMode) {
@@ -133,11 +133,11 @@ class MainActivity : AppCompatActivity() {
             override fun run() {
                 if (webViewReady && TrackingService.isRunning) {
                     val json = "{\"speed\":${"%.1f".format(java.util.Locale.US, TrackingService.currentSpeed)}," +
-                            "\"distance\":${"%.2f".format(java.util.Locale.US, TrackingService.currentDistance)}," +
-                            "\"seconds\":${TrackingService.currentSeconds}," +
-                            "\"altitude\":${"%.0f".format(java.util.Locale.US, TrackingService.currentAltitude)}," +
-                            "\"gain\":${"%.0f".format(java.util.Locale.US, TrackingService.currentGain)}," +
-                            "\"baroAvailable\":${TrackingService.baroAvailable}}"
+                               "\"distance\":${"%.2f".format(java.util.Locale.US, TrackingService.currentDistance)}," +
+                               "\"seconds\":${TrackingService.currentSeconds}," +
+                               "\"altitude\":${"%.0f".format(java.util.Locale.US, TrackingService.currentAltitude)}," +
+                               "\"gain\":${"%.0f".format(java.util.Locale.US, TrackingService.currentGain)}," +
+                               "\"baroAvailable\":${TrackingService.baroAvailable}}"
                     sendToJS("updateFromService", json)
                 }
                 syncHandler?.postDelayed(this, 1000)
@@ -160,7 +160,7 @@ class MainActivity : AppCompatActivity() {
             try {
                 val csv = contentResolver.openInputStream(uri)?.bufferedReader()?.readText() ?: return
                 val esc = csv.replace("\\", "\\\\").replace("\"", "\\\"")
-                    .replace("\n", "\\n").replace("\r", "")
+                              .replace("\n", "\\n").replace("\r", "")
                 sendToJS("importCsvData", "\"$esc\"")
             } catch (e: Exception) {
                 sendToJS("showToast", "\"Import-Fehler: ${e.message}\"")
@@ -271,7 +271,7 @@ class Bridge(private val ctx: MainActivity) {
             if (intent != null) {
                 intent.addFlags(
                     Intent.FLAG_ACTIVITY_NEW_TASK or
-                            Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT
+                    Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT
                 )
                 if (!ctx.isInMultiWindowMode) {
                     Toast.makeText(ctx,
@@ -340,7 +340,7 @@ class Bridge(private val ctx: MainActivity) {
                     try {
                         val name = "navinci_${label}_${System.currentTimeMillis()}.csv"
                         val dir  = android.os.Environment.getExternalStoragePublicDirectory(
-                            android.os.Environment.DIRECTORY_DOWNLOADS)
+                                       android.os.Environment.DIRECTORY_DOWNLOADS)
                         dir.mkdirs()
                         java.io.File(dir, name).writeText(clean, Charsets.UTF_8)
                         ctx.webView.evaluateJavascript("localStorage.removeItem('navinci_csv_export')", null)
@@ -355,4 +355,63 @@ class Bridge(private val ctx: MainActivity) {
     }
 
     @JavascriptInterface fun getAppVersion(): String = BuildConfig.VERSION_NAME
+
+    /**
+     * GPX-Export der aktuell laufenden bzw. zuletzt aufgezeichneten Fahrt.
+     * Baut GPX 1.1 XML direkt aus TrackingService.trackPoints und speichert
+     * die Datei ins Downloads-Verzeichnis.
+     */
+    @JavascriptInterface
+    fun exportGpx(label: String) {
+        ctx.runOnUiThread {
+            val service = TrackingService.instance
+            if (service == null) {
+                ctx.webView.evaluateJavascript(
+                    "window.showToast('Kein aktiver Tracking-Service')", null)
+                return@runOnUiThread
+            }
+            val points = service.getTrackPoints()
+            if (points.isEmpty()) {
+                ctx.webView.evaluateJavascript(
+                    "window.showToast('Keine Trackpunkte aufgezeichnet')", null)
+                return@runOnUiThread
+            }
+
+            val isoFormat = java.text.SimpleDateFormat(
+                "yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US
+            ).apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
+
+            val safeLabel = label.ifBlank { "fahrt" }
+                .replace(Regex("[^A-Za-z0-9_-]"), "_")
+
+            val sb = StringBuilder()
+            sb.append("""<?xml version="1.0" encoding="UTF-8"?>""" + "\n")
+            sb.append("""<gpx version="1.1" creator="Navinci" xmlns="http://www.topografix.com/GPX/1/1">""" + "\n")
+            sb.append("  <trk>\n")
+            sb.append("    <name>$safeLabel</name>\n")
+            sb.append("    <trkseg>\n")
+            for ((lat, lon, ts) in points) {
+                val time = isoFormat.format(java.util.Date(ts))
+                sb.append("      <trkpt lat=\"${"%.6f".format(java.util.Locale.US, lat)}\" ")
+                sb.append("lon=\"${"%.6f".format(java.util.Locale.US, lon)}\">")
+                sb.append("<time>$time</time></trkpt>\n")
+            }
+            sb.append("    </trkseg>\n")
+            sb.append("  </trk>\n")
+            sb.append("</gpx>\n")
+
+            try {
+                val fileName = "navinci_${safeLabel}_${System.currentTimeMillis()}.gpx"
+                val dir = android.os.Environment.getExternalStoragePublicDirectory(
+                    android.os.Environment.DIRECTORY_DOWNLOADS)
+                dir.mkdirs()
+                java.io.File(dir, fileName).writeText(sb.toString(), Charsets.UTF_8)
+                ctx.webView.evaluateJavascript(
+                    "window.showToast('✓ GPX gespeichert: $fileName (${points.size} Punkte)')", null)
+            } catch (e: Exception) {
+                ctx.webView.evaluateJavascript(
+                    "window.showToast('GPX-Fehler: ${e.message}')", null)
+            }
+        }
+    }
 }

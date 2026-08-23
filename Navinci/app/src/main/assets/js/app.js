@@ -903,6 +903,15 @@ window.histExport = function() {
     if (typeof NativeBridge !== 'undefined') NativeBridge.exportCsv('ready');
 };
 
+// ── GPX-Export (aktuelle bzw. zuletzt aufgezeichnete Fahrt) ──────────────────
+// Exportiert die GPS-Trackpunkte des laufenden/letzten TrackingService als
+// GPX-Track — direkt aus Kotlin gebaut (keine JS-seitige Datenhaltung nötig).
+window.histExportGpx = function() {
+    if (typeof NativeBridge === 'undefined') return;
+    const label = new Date().toISOString().slice(0,10).replace(/-/g,'');
+    NativeBridge.exportGpx(label);
+};
+
 // ── Daten löschen ─────────────────────────────────────────────────────────────
 window.histClear = function() {
     const L = LABELS[getLang()];

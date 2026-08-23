@@ -42,6 +42,9 @@ class TrackingService : Service() {
     private var rideSeconds = 0
     private var timerThread: Thread? = null
 
+    // GPX-Trackpunkte der aktuellen Fahrt (lat, lon, timestampMillis)
+    private val trackPoints = mutableListOf<Triple<Double, Double, Long>>()
+
     // Barometer
     private var refPressure  = -1f
     private var lastAltitude = Float.NaN
@@ -58,10 +61,12 @@ class TrackingService : Service() {
         var baroAvailable     = false
         var isRunning         = false
         var resetRequested    = false
+        var instance: TrackingService? = null   // für GPX-Export von außen
     }
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
         locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
         sensorManager   = getSystemService(Context.SENSOR_SERVICE)   as SensorManager
         startForeground(NOTIF_ID, buildNotification())
@@ -71,12 +76,17 @@ class TrackingService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        instance = null
         stopGps(); stopBaro()
         timerThread?.interrupt()
         isRunning = false
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    /** Kopie der aktuellen Trackpunkte (thread-safe Snapshot) */
+    @Synchronized
+    fun getTrackPoints(): List<Triple<Double, Double, Long>> = trackPoints.toList()
 
     // GPS
     private val locationListener = object : LocationListener {
@@ -88,11 +98,18 @@ class TrackingService : Service() {
                 refPressure = -1f; lastAltitude = Float.NaN
                 currentAltitude = 0f; currentGain = 0f
                 baroWindow.clear()
+                synchronized(this@TrackingService) { trackPoints.clear() }
                 resetRequested = false
                 return
             }
             val speedKmh = loc.speed * 3.6f
             currentSpeed = if (speedKmh < 2f) 0f else speedKmh
+            // Trackpunkt aufzeichnen (nur bei Bewegung, um Stillstand-Cluster zu vermeiden)
+            if (currentSpeed > 0f) {
+                synchronized(this@TrackingService) {
+                    trackPoints.add(Triple(loc.latitude, loc.longitude, System.currentTimeMillis()))
+                }
+            }
             if (lastLat != 0.0 && currentSpeed > 0f) {
                 totalKm += haversine(lastLat, lastLon, loc.latitude, loc.longitude)
                 currentDistance = totalKm
